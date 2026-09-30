@@ -6,7 +6,7 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
-export type Change = { path: string; status: "created" | "updated" | "unchanged" };
+export type Change = { path: string; status: "created" | "updated" | "unchanged"; note?: string };
 
 // Writes only when the content differs, so re-running init reports what it actually touched.
 export async function writeIfChanged(root: string, path: string, content: string): Promise<Change> {

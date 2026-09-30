@@ -1,5 +1,5 @@
 /**
- * @file Exports `openDb`: opens SQLite in WAL mode with a busy timeout and creates the items, events and cursors tables.
+ * @file Exports `openDb`: SQLite in WAL mode with a busy timeout, creating the items, events, cursors and heartbeats tables.
  * @tags sqlite, database
  * @related src/shared/config.ts, src/shared/schemas.ts
  */
@@ -37,5 +37,10 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE TABLE IF NOT EXISTS cursors (
   name     TEXT    PRIMARY KEY,
   event_id INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS heartbeats (
+  service TEXT    PRIMARY KEY,
+  pid     INTEGER NOT NULL,
+  beat_at INTEGER NOT NULL
 );
 `;

@@ -1,0 +1,6 @@
+{
+  "claude-monitor": {
+    "command": "claude-monitor",
+    "args": ["mcp"]
+  }
+}

@@ -28,3 +28,17 @@ test("install writes the integration, keeps user content and is idempotent", asy
 
   expect(await Bun.file(join(root, ".claude/skills/claude-monitor/SKILL.md")).exists()).toBe(true);
 });
+
+test("install sets the status line but keeps one the project already has", async () => {
+  const fresh = await mkdtemp(join(tmpdir(), "cc-init-"));
+  await install(fresh);
+  const settings = await Bun.file(join(fresh, ".claude/settings.json")).json();
+  expect(settings.statusLine.command).toBe("claude-monitor status");
+
+  const custom = await mkdtemp(join(tmpdir(), "cc-init-"));
+  const theirs = { type: "command", command: "my-status" };
+  await Bun.write(join(custom, ".claude/settings.json"), JSON.stringify({ statusLine: theirs }));
+  const changes = await install(custom);
+  expect((await Bun.file(join(custom, ".claude/settings.json")).json()).statusLine).toEqual(theirs);
+  expect(changes.find((c) => c.path === ".claude/settings.json")?.note).toContain("kept");
+});

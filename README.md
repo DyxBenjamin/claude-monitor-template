@@ -1,5 +1,5 @@
 ---
-summary: Documents the mcp, web and monitor processes, the init command, source layout, env vars, and local and Docker setup.
+summary: Documents the CLI commands, Claude plugin, status line, shared SQLite state, env vars and Docker setup.
 tags: [mcp, http-api, monitor, docker, sqlite]
 related: [index.ts, src/shared/items.ts, docker-compose.yml, .mcp.json]
 ---
@@ -15,7 +15,7 @@ person ⇄ web (UI + /api) ────┐
                              ├──► SQLite: items + events ──► monitor ──► Claude (plugin hook)
 Claude ⇄ mcp (MCP tools) ────┘
 
-init: installs the Claude plugin (skill, CLAUDE.md block, MCP server, hook) into a project
+init: installs the Claude plugin (skill, CLAUDE.md block, MCP server, hook, status line) into a project
 ```
 
 Every write goes through `src/shared/items.ts`, which stores the change and an event tagged with its source (`user`
@@ -53,7 +53,8 @@ Open Claude Code in that project and enable the `claude-monitor` MCP server when
 | `web`                            | Starts the web server                                                    |
 | `mcp`                            | Starts the MCP server on stdio                                           |
 | `monitor [--from N]`             | Streams the person's changes, one line each, until stopped               |
-| `monitor --once [--cursor NAME]` | Prints the person's changes since the previous call under `NAME`, then exits |
+| `monitor --once [--cursor NAME]` | Prints the person's changes since the previous delivery under `NAME`, then exits |
+| `status`                         | One line showing which of web, mcp and monitor are running               |
 
 Settings come from env vars (`src/shared/config.ts`); Bun loads `.env` automatically.
 
@@ -62,6 +63,7 @@ Settings come from env vars (`src/shared/config.ts`); Bun loads `.env` automatic
 | `CLAUDE_MONITOR_DB`               | `data/claude-monitor.sqlite` in the repo |
 | `CLAUDE_MONITOR_PORT`             | `3000`                               |
 | `CLAUDE_MONITOR_MONITOR_INTERVAL` | `1000` (ms between polls)            |
+| `CLAUDE_MONITOR_HEARTBEAT`        | `2000` (ms between service heartbeats) |
 
 **Expand it.** A command is a function `(args: string[]) => void | Promise<void>` in `src/<command>/index.ts`. Add it
 to `commands` and to `usage` in `index.ts`, and parse its flags with `parseArgs` from `util`.
@@ -108,10 +110,19 @@ plugin never echoes Claude's own changes back to it. stdout carries the protocol
 | `CLAUDE.md`             | `templates/CLAUDE.md`       | Short standing note, between `claude-monitor:start/end` markers        |
 | `.mcp.json`             | `templates/mcp.json`        | Registers the MCP server as `claude-monitor mcp`                       |
 | `.claude/settings.json` | `templates/hooks.json`      | `UserPromptSubmit` hook: `claude-monitor monitor --once`               |
+| `.claude/settings.json` | `templates/statusline.json` | Status line: `claude-monitor status`                                   |
 
-The hook is the monitor's delivery channel: before each prompt it adds the person's changes since the previous prompt
-to Claude's context. During a long task Claude can follow them live by running `claude-monitor monitor` with its
-Monitor tool.
+The person's changes reach Claude two ways, both through the monitor:
+
+- **Live feed.** When the skill loads, Claude starts `claude-monitor monitor` with its Monitor tool and re-arms it each
+  time it expires; every change arrives as a notification while Claude works.
+- **Prompt hook.** Before each prompt, `claude-monitor monitor --once` adds the changes the feed has not delivered.
+
+Both advance the same cursor (`hook` by default), so each change reaches Claude once.
+
+The status line shows which services are running, for example `claude-monitor ● web ● mcp ○ monitor`. `web`, `mcp`
+and `monitor` each write a heartbeat to the database every 2 s; a service counts as running while its last heartbeat
+is younger than 5 s. `mcp` is running while Claude Code has the MCP server connected.
 
 `init` is idempotent. It rewrites only the files it owns and the parts of shared files it manages (its `CLAUDE.md`
 block, its MCP server entry, its hook groups), leaves the rest as the project had it, and reports each file as
@@ -119,7 +130,8 @@ block, its MCP server entry, its hook groups), leaves the rest as the project ha
 
 **Expand it.** Drop a skill folder into `templates/skills/`, add hook groups to `templates/hooks.json` (same shape as
 `hooks` in Claude Code settings), servers to `templates/mcp.json`, or text to `templates/CLAUDE.md`, and re-run
-`init`. Anything that needs a new file type gets a writer in `src/init/files.ts` and a line in `install()`.
+`init`. If the project already sets its own `statusLine`, `init` keeps it and says so. Anything that needs a new
+file type gets a writer in `src/init/files.ts` and a line in `install()`.
 
 ## Shared state
 
@@ -130,11 +142,12 @@ block, its MCP server entry, its hook groups), leaves the rest as the project ha
 | `db.ts`      | `openDb()`: SQLite in WAL mode with a busy timeout, and the table schema   |
 | `schemas.ts` | zod schemas and their types (`Item`, `CreateItem`, `UpdateItem`, `Event`)  |
 | `items.ts`   | Item repository; each mutation writes the item and its event together     |
-| `events.ts`  | Event log queries and the named cursors behind `monitor --once`           |
+| `events.ts`  | Event log queries and the named cursors the monitor delivers from         |
+| `heartbeats.ts` | Service heartbeats and the up/down status behind `status`              |
 | `config.ts`  | Settings from env vars                                                     |
 
-Tables: `items` (the example state), `events` (one row per change, with source, action and an item snapshot) and
-`cursors` (last event each `monitor --once` consumer has seen).
+Tables: `items` (the example state), `events` (one row per change, with source, action and an item snapshot),
+`cursors` (last event delivered to each consumer) and `heartbeats` (last beat of each running service).
 
 **Expand it.** `items` is the example entity. To replace or add one: define its schemas in `schemas.ts`, add its
 table to `db.ts`, write a repository like `items.ts` that records an event in the same transaction, then expose it
@@ -150,6 +163,7 @@ src/
   web/                  api.ts, index.ts, ui/ (React)
   mcp/                  server.ts (tools), index.ts (stdio)
   monitor/              index.ts (stream and --once)
+  status/               index.ts (status line)
   init/                 index.ts (install), files.ts (idempotent writers)
 templates/              the Claude plugin init installs
 ```
